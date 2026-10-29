@@ -1,5 +1,6 @@
 import shutil
 import pathlib
+import subprocess
 import sys
 import os
 from argparse import ArgumentParser
@@ -7,7 +8,9 @@ from argparse import ArgumentParser
 
 def execute(command):
     print(command, file=sys.stderr)
-    os.system(command)
+    result = subprocess.run(command, shell=True)
+    if result.returncode != 0:
+        sys.exit(f"Command failed (exit {result.returncode}): {command}")
 
 
 def rename_dylib_reference(base_dir: pathlib.Path, file: pathlib.Path):

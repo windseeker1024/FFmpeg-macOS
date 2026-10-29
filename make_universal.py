@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 import shutil
+import subprocess
 import sys
 import os
 import pathlib
@@ -7,11 +8,35 @@ import pathlib
 
 def execute(command):
     print(command, file=sys.stderr)
-    os.system(command)
+    result = subprocess.run(command, shell=True)
+    if result.returncode != 0:
+        sys.exit(f"Command failed (exit {result.returncode}): {command}")
+
+
+def archs_of(path) -> set:
+    result = subprocess.run(["lipo", "-archs", str(path)], capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(f"lipo -archs failed on {path}: {result.stderr.strip()}")
+    return set(result.stdout.split())
 
 
 def create_universal_binary(x86_path, arm_path, universal_path):
+    # Validate each input before merging: `lipo -create -arch <label> <file>`
+    # stamps the slice with the label it is given and never checks the file's
+    # real architecture, so a wrong input yields a mislabeled fat file that
+    # only blows up far downstream (e.g. at install_name_tool or at runtime).
+    arm_archs = archs_of(arm_path)
+    if arm_archs != {"arm64"}:
+        sys.exit(f"Expected a pure arm64 input, got {sorted(arm_archs)}: {arm_path}")
+    x86_archs = archs_of(x86_path)
+    if x86_archs != {"x86_64"}:
+        sys.exit(f"Expected a pure x86_64 input, got {sorted(x86_archs)}: {x86_path}")
+
     execute(f"lipo -create -arch arm64 {arm_path} -arch x86_64 {x86_path} -output {universal_path}")
+
+    merged = archs_of(universal_path)
+    if not {"arm64", "x86_64"} <= merged:
+        sys.exit(f"Merged file is missing an architecture ({sorted(merged)}): {universal_path}")
 
     with os.popen(f"otool -L {arm_path}") as p:
         query_out = p.readlines()
